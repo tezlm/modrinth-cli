@@ -69,13 +69,12 @@ pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, st
                 Ok(ver) => ver.matches(&target),
                 Err(_) => true,
             });
-        println!("{}, {:?}", found, version);
         if found {
             return Ok(version.files.get(0).unwrap().to_owned());
         }
     }
  
-    Err(std::io::Error::new(std::io::ErrorKind::NotFound, "cant find mod"))
+    Err(std::io::Error::new(std::io::ErrorKind::NotFound, "cant find correct version"))
 }
 
 fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: ProgressBar<T>) -> Result<(), std::io::Error> {
@@ -118,7 +117,7 @@ fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: Progress
 }
 
 fn install_single(id: &String, target: &Version) -> Result<OptionMod, std::io::Error> {
-    let bullseye = find_correct_version(&id, &target).expect("couldnt find mod");
+    let bullseye = find_correct_version(&id, &target)?;
     let ModFile { url, filename } = bullseye;
     let bar = ProgressBar::new(0);
 
@@ -132,17 +131,15 @@ fn install_single(id: &String, target: &Version) -> Result<OptionMod, std::io::E
 }
 
 fn install_pack(mods: &Vec<OptionMod>) -> Result<(), std::io::Error> {
-    let multi = pbr::MultiBar::new();
-    multi.println(&"downloading mods".cyan().bold());
+    println!("{}", "downloading mods".cyan().bold());
 
     for m in mods {
-        let bar = multi.create_bar(0);
-        // TODO: make multithreaded?
+        if std::fs::metadata(&m.filename).is_ok() { continue }
+        let bar = ProgressBar::new(0);
         install(&m.url, &m.filename, bar)?;
     }
     
-    multi.listen();
-    multi.println(&"done!".green().bold());
+    println!("\r{}{}", crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine), "done!".green().bold());
 
     Ok(())
 }
@@ -218,7 +215,10 @@ fn main() -> Result<(), std::io::Error> {
             match find_mod(&query, &mods, &options) {
                 Some(ModState::Uninstalled(m)) => {
                     let version = Version::parse(&options.version).unwrap();
-                    options.mods.push(install_single(&m, &version)?)
+                    match install_single(&m, &version) {
+                        Ok(m) => options.mods.push(m),
+                        Err(why) => println!("{} {}", "error:".bold().red(), why),
+                    };
                 },
                 Some(ModState::Installed(_)) => {
                     println!("already installed!");

@@ -10,6 +10,7 @@ edition = "2021"
 [dependencies]
 attohttpc = { version = "0.18.0", features = ["json"] }
 colored = "2.0.0"
+crossterm = "0.22.1"
 inquire = "0.2.1"
 pbr = "1.0.4"
 semver = "1.0.4"
