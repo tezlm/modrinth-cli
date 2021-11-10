@@ -1,6 +1,7 @@
 [package]
 name = "modrinth-cli"
-description = "unofficial modrinth cli interface"
+description = "unofficial modrinth cli"
+authors = ["tezlm", "zestylemonade", "sample-text-here"]
 version = "0.1.0"
 edition = "2021"
 

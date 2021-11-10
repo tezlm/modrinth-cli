@@ -1,24 +1,24 @@
 use serde::{Serialize, Deserialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Options {
     pub version: String,
     pub mods: Vec<OptionMod>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct OptionMod {
     pub id: String,
     pub url: String,
     pub filename: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct MinecraftMods {
     pub hits: Vec<MinecraftMod>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct MinecraftMod {
     #[serde(rename = "mod_id")]
     pub id: String,
@@ -28,7 +28,7 @@ pub struct MinecraftMod {
     pub description: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ModVersion {
     #[serde(rename = "game_versions")]
     pub versions: Vec<String>,
@@ -37,7 +37,7 @@ pub struct ModVersion {
     pub files: Vec<ModFile>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ModFile {
     pub url: String,
     pub filename: String,

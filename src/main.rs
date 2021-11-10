@@ -10,7 +10,7 @@ use semver::{Version,VersionReq};
 
 fn parse_config() -> Options {
     match std::fs::read_to_string("./mods.json") {
-        Ok(str) => serde_json::from_str(&str).unwrap(),
+        Ok(str) => serde_json::from_str(&str).expect("invalid json in mods.json!"),
         Err(_) => {
             let version = Text::new("(exact) minecraft version")
                 .with_validator(&|str| match Version::parse(str) {
@@ -67,8 +67,9 @@ pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, st
             .iter()
             .any(|ver| match VersionReq::parse(ver) {
                 Ok(ver) => ver.matches(&target),
-                Err(_) => false,
+                Err(_) => true,
             });
+        println!("{}, {:?}", found, version);
         if found {
             return Ok(version.files.get(0).unwrap().to_owned());
         }
@@ -77,9 +78,9 @@ pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, st
     Err(std::io::Error::new(std::io::ErrorKind::NotFound, "cant find mod"))
 }
 
-pub fn download(url: &String) -> Result<(u64, attohttpc::ResponseReader), std::io::Error> {
+fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: ProgressBar<T>) -> Result<(), std::io::Error> {
     let res = get(&url).send()?;
-    let (_, headers, body) = res.split();
+    let (_, headers, mut body) = res.split();
     let len = headers
         .get("Content-Length")
         .unwrap()
@@ -88,16 +89,7 @@ pub fn download(url: &String) -> Result<(u64, attohttpc::ResponseReader), std::i
         .to_string()
         .parse()
         .unwrap();
-    
-    Ok((len, body))
-}
 
-fn install(id: &String, target: &Version) -> Result<OptionMod, std::io::Error> {
-    let bullseye = find_correct_version(&id, &target).expect("couldnt find mod");
-    let ModFile { url, filename } = bullseye;
-
-    let (len, mut body) = download(&url).unwrap();
-    let mut bar = ProgressBar::new(len);
     let mut buffer = [0u8; 0x4000];
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -105,10 +97,11 @@ fn install(id: &String, target: &Version) -> Result<OptionMod, std::io::Error> {
         .create(true)
         .open(&filename)?; 
     
+    bar.total = len;
     bar.set_units(Units::Bytes);
     bar.show_tick = false;
     bar.show_percent = false;
-    bar.show_time_left = true;
+    bar.show_time_left = false;
     bar.show_speed = false;
     bar.message(&format!("{} {} ", "downloading".cyan().bold(), &filename));
 
@@ -119,8 +112,18 @@ fn install(id: &String, target: &Version) -> Result<OptionMod, std::io::Error> {
         bar.add(size as u64);
     }
 
-    bar.finish_print(&format!("{} {} ", "downloaded".green().bold(), &filename));
+    bar.finish_println(&format!("{} {} ", "downloaded".green().bold(), &filename));
 
+    Ok(())
+}
+
+fn install_single(id: &String, target: &Version) -> Result<OptionMod, std::io::Error> {
+    let bullseye = find_correct_version(&id, &target).expect("couldnt find mod");
+    let ModFile { url, filename } = bullseye;
+    let bar = ProgressBar::new(0);
+
+    install(&url, &filename, bar)?;
+    
     Ok(OptionMod {
         id: id.to_string(),
         filename: filename.to_owned(),
@@ -128,39 +131,39 @@ fn install(id: &String, target: &Version) -> Result<OptionMod, std::io::Error> {
     })
 }
 
-//fn install_pack(mods: &Vec<OptionMod>) -> Result<(), std::io::Error> {
-//    let mut bar = ProgressBar::new(mods.len());
-//    bar.set_action("downloading", Color::Cyan, Style::Normal);
-//    
-//    for m in mods {
-//        let (len, mut body) = download(&m.url).unwrap();
-//        let mut progress = 0;
-//        let mut buffer = [0u8; 0x4000];
-//        let mut file = std::fs::OpenOptions::new()
-//            .write(true)
-//            .create(true)
-//            .open(&m.filename)?; 
-//
-//        loop {
-//            let size = body.read(&mut buffer)?;
-//            if size == 0 { break }
-//            file.write_all(&buffer).unwrap();
-//            progress += size;
-//            bar.set_progression(progress);
-//        }
-//
-//        bar.inc();
-//    }
-//
-//    bar.set_action("downloaded", Color::Green, Style::Normal);
-//    bar.finalize();
-//    Ok(())
-//}
+fn install_pack(mods: &Vec<OptionMod>) -> Result<(), std::io::Error> {
+    let multi = pbr::MultiBar::new();
+    multi.println(&"downloading mods".cyan().bold());
+
+    for m in mods {
+        let bar = multi.create_bar(0);
+        // TODO: make multithreaded?
+        install(&m.url, &m.filename, bar)?;
+    }
+    
+    multi.listen();
+    multi.println(&"done!".green().bold());
+
+    Ok(())
+}
+
+fn already_installed(id: &String, options: &Options) -> bool {
+    match options.mods.iter().find(|h| h.id.eq(id)) { 
+        Some(found) => {
+            if std::fs::metadata(&found.filename).is_ok() {
+                true
+            } else {
+                false
+            }
+        },
+        None => false,
+    }
+}
 
 fn find_mod(query: &str, mods: &MinecraftMods, options: &Options) -> Option<ModState> {
     if mods.hits.len() == 1 {
         let id = mods.hits[0].id.to_owned();
-        if options.mods.iter().any(|h| h.id == id) {
+        if already_installed(&id, &options) {
             return Some(ModState::Installed(id));
         } else {
             return Some(ModState::Uninstalled(id));
@@ -169,7 +172,7 @@ fn find_mod(query: &str, mods: &MinecraftMods, options: &Options) -> Option<ModS
 
     for (i, m) in mods.hits.iter().enumerate() {
         if m.title.to_lowercase() == query {
-            if options.mods.iter().any(|h| h.id == m.id) {
+            if already_installed(&m.id, &options) {
                 return Some(ModState::Installed(m.id.to_owned()));
             } else {
                 return Some(ModState::Uninstalled(m.id.to_owned()));
@@ -201,20 +204,21 @@ fn main() -> Result<(), std::io::Error> {
             println!("    {}: {}", "install, i".blue(), "install a mod");
             println!("    {}: {}", "remove, rm".blue(), "remove a mod");
             println!("    {}:  {}", "update, u".blue(), "update all mods");
-        }
+            println!("    {}:    {}", "pack, p".blue(), "install from mods.json");
+        },
         "search" | "s" => {
-            let mods = search_mods(&query).unwrap();
+            let mods = search_mods(&query)?;
             for i in mods.hits {
                 print_mod(&i);
             };
-        }
+        },
         "install" | "i" => {
             let query = if query.is_empty() { Text::new("query").prompt().unwrap() } else { query };
-            let mods = search_mods(&query).unwrap();
+            let mods = search_mods(&query)?;
             match find_mod(&query, &mods, &options) {
                 Some(ModState::Uninstalled(m)) => {
                     let version = Version::parse(&options.version).unwrap();
-                    options.mods.push(install(&m, &version)?)
+                    options.mods.push(install_single(&m, &version)?)
                 },
                 Some(ModState::Installed(_)) => {
                     println!("already installed!");
@@ -223,7 +227,7 @@ fn main() -> Result<(), std::io::Error> {
                     println!("{} no mods", "error:".bold().red());
                 },
             };
-        }
+        },
         "remove" | "rm" => {
             let query = query.to_lowercase();
             match options.mods.iter().position(|m| m.filename.to_lowercase().contains(&query)) {
@@ -240,7 +244,14 @@ fn main() -> Result<(), std::io::Error> {
                     println!("{} cant find mod", "error:".bold().red());
                 },
             };
-        }
+        },
+        "pack" | "p" => {
+            if options.mods.len() == 0 {
+                println!("no mods in pack!");
+            } else {
+                install_pack(&options.mods)?;
+            }
+        },
         "update" | "u" => {
             let mut outdated = Vec::new();
             let version = Version::parse(&options.version).unwrap();
@@ -250,16 +261,17 @@ fn main() -> Result<(), std::io::Error> {
             }
             for m in &mut outdated {
                 std::fs::remove_file(&m.filename).unwrap_or_default();
-                let OptionMod { filename, url, ..} = install(&m.id, &version)?;
+                let OptionMod { filename, url, ..} = install_single(&m.id, &version)?;
                 m.filename = filename;
                 m.url = url;
             }
-        }
+        },
         _ => {
-            eprintln!("{} {} is not a command", "error:".bold().red(), subcommand);
+            println!("{} {} is not a command", "error:".bold().red(), subcommand);
             return Ok(());
-        }
+        },
     }
+    
     std::fs::write("mods.json", serde_json::to_string(&options)?)?;
     Ok(())
 }
