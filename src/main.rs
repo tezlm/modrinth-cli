@@ -7,6 +7,7 @@ use colored::*;
 use inquire::{Text, Confirm};
 use attohttpc::get;
 use semver::{Version,VersionReq};
+use crossterm::terminal::{Clear, ClearType};
 
 fn parse_config() -> Options {
     match std::fs::read_to_string("./mods.json") {
@@ -67,7 +68,7 @@ pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, st
             .iter()
             .any(|ver| match VersionReq::parse(ver) {
                 Ok(ver) => ver.matches(&target),
-                Err(_) => true,
+                Err(_) => false,
             });
         if found {
             return Ok(version.files.get(0).unwrap().to_owned());
@@ -102,7 +103,7 @@ fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: Progress
     bar.show_percent = false;
     bar.show_time_left = false;
     bar.show_speed = false;
-    bar.message(&format!("{} {} ", "downloading".cyan().bold(), &filename));
+    bar.message(&format!("{} {} ", "downloading".bright_cyan(), &filename));
 
     loop {
         let size = body.read(&mut buffer)?;
@@ -111,7 +112,7 @@ fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: Progress
         bar.add(size as u64);
     }
 
-    bar.finish_println(&format!("{} {} ", "downloaded".green().bold(), &filename));
+    bar.finish_println(&format!("{} {} ", "downloaded".bright_green(), &filename));
 
     Ok(())
 }
@@ -131,15 +132,15 @@ fn install_single(id: &String, target: &Version) -> Result<OptionMod, std::io::E
 }
 
 fn install_pack(mods: &Vec<OptionMod>) -> Result<(), std::io::Error> {
-    println!("{}", "downloading mods".cyan().bold());
+    println!("{}", "downloading mods".bright_cyan());
 
     for m in mods {
         if std::fs::metadata(&m.filename).is_ok() { continue }
         let bar = ProgressBar::new(0);
         install(&m.url, &m.filename, bar)?;
     }
-    
-    println!("\r{}{}", crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine), "done!".green().bold());
+
+    println!("\r{}{}", Clear(ClearType::CurrentLine), "done!".bright_green());
 
     Ok(())
 }
@@ -255,10 +256,21 @@ fn main() -> Result<(), std::io::Error> {
         "update" | "u" => {
             let mut outdated = Vec::new();
             let version = Version::parse(&options.version).unwrap();
+
+            let mut bar = ProgressBar::new(options.mods.len() as u64);
+            bar.show_tick = false;
+            bar.show_percent = false;
+            bar.show_time_left = false;
+            bar.show_speed = false;
+            bar.message(&format!("{} ", "checking".bright_cyan()));
+            
             for m in &mut options.mods {
                 let ModFile { url, .. } = find_correct_version(&m.id, &version).unwrap();
                 if url != m.url { outdated.push(m) }
+                bar.inc();
             }
+            bar.finish_println("done checking");
+           
             for m in &mut outdated {
                 std::fs::remove_file(&m.filename).unwrap_or_default();
                 let OptionMod { filename, url, ..} = install_single(&m.id, &version)?;
