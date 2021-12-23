@@ -74,17 +74,7 @@ pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, Er
             });
 
         match found_version_index {
-            Some(idx) => {
-                let message: ColoredString = format!(
-                    "found {} {} for {}",
-                    mod_version.version_type,
-                    mod_version.version_number,
-                    target
-                ).italic().bright_black();
-
-                println!("{}", message);
-                return Ok(mod_version.files[idx].to_owned());
-            },
+            Some(idx) => { return Ok(mod_version.files[idx].to_owned()); },
             None => { continue; }
         }
     }
