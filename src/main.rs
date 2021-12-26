@@ -83,7 +83,7 @@ pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, Er
         Error::new(
             ErrorKind::NotFound,
             format!(
-                "could not find version that satisfies target {} and loader paper",
+                "could not find version that satisfies target {} and fabric loader",
                 target
             )
         )
