@@ -1,12 +1,12 @@
 pub mod structs;
 use crate::structs::*;
 use std::env;
-use std::io::{Read, Write};
+use std::io::{Error, ErrorKind, Read, Write};
 use pbr::{ProgressBar, Units};
 use colored::*;
 use inquire::{Text, Confirm};
 use attohttpc::get;
-use semver::{Version,VersionReq};
+use semver::{Version, VersionReq};
 use crossterm::terminal::{Clear, ClearType};
 
 fn parse_config() -> Options {
@@ -42,7 +42,7 @@ fn print_mod(mcmod: &MinecraftMod) {
     println!("");
 }
 
-pub fn search_mods(query: &String) -> Result<MinecraftMods, std::io::Error> {
+pub fn search_mods(query: &String) -> Result<MinecraftMods, Error> {
     let mut mods: MinecraftMods = get("https://api.modrinth.com/api/v1/mod")
         .param("query", &query)
         .send()?
@@ -53,32 +53,44 @@ pub fn search_mods(query: &String) -> Result<MinecraftMods, std::io::Error> {
     Ok(mods)
 }
 
-pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, std::io::Error> {
-    let url = format!("https://api.modrinth.com/api/v1/mod/{}/version", id);
-    let versions: Vec<ModVersion> = get(url)
+pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, Error> {
+    let url: String = format!("https://api.modrinth.com/api/v1/mod/{}/version", id);
+    let mod_versions: Vec<ModVersion> = get(url)
         .send()?
         .json()?;
 
-    for version in versions {
-        if !version.loaders.contains(&"fabric".into()) {
-            continue
-        }
-        let found = version
-            .versions
+    for mod_version in mod_versions {
+        if !mod_version.loaders.contains(&"fabric".into()) { continue; }
+
+        let found_version_index: Option<usize> = mod_version
+            .game_versions
             .iter()
-            .any(|ver| match VersionReq::parse(ver) {
-                Ok(ver) => ver.matches(&target),
-                Err(_) => false,
+            .position(|ver| {
+                let attempt = VersionReq::parse(format!("={}", ver).as_str());
+                match attempt {
+                    Ok(parsed_ver) => parsed_ver.matches(&target),
+                    Err(_) => false
+                }
             });
-        if found {
-            return Ok(version.files.get(0).unwrap().to_owned());
+
+        match found_version_index {
+            Some(idx) => { return Ok(mod_version.files[idx].to_owned()); },
+            None => { continue; }
         }
     }
- 
-    Err(std::io::Error::new(std::io::ErrorKind::NotFound, "cant find correct version"))
+
+    Err(
+        Error::new(
+            ErrorKind::NotFound,
+            format!(
+                "could not find version that satisfies target {} and fabric loader",
+                target
+            )
+        )
+    )
 }
 
-fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: ProgressBar<T>) -> Result<(), std::io::Error> {
+fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: ProgressBar<T>) -> Result<(), Error> {
     let res = get(&url).send()?;
     let (_, headers, mut body) = res.split();
     let len = headers
@@ -117,7 +129,7 @@ fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: Progress
     Ok(())
 }
 
-fn install_single(id: &String, target: &Version) -> Result<OptionMod, std::io::Error> {
+fn install_single(id: &String, target: &Version) -> Result<OptionMod, Error> {
     let bullseye = find_correct_version(&id, &target)?;
     let ModFile { url, filename } = bullseye;
     let bar = ProgressBar::new(0);
@@ -131,7 +143,7 @@ fn install_single(id: &String, target: &Version) -> Result<OptionMod, std::io::E
     })
 }
 
-fn install_pack(mods: &Vec<OptionMod>) -> Result<(), std::io::Error> {
+fn install_pack(mods: &Vec<OptionMod>) -> Result<(), Error> {
     println!("{}", "downloading mods".bright_cyan());
 
     for m in mods {
@@ -188,7 +200,7 @@ fn find_mod(query: &str, mods: &MinecraftMods, options: &Options) -> Option<ModS
     None
 }
 
-fn main() -> Result<(), std::io::Error> {
+fn main() -> Result<(), Error> {
     let (subcommand, query) = get_command();
     let mut options = parse_config();
     match subcommand.as_str() {
@@ -225,7 +237,7 @@ fn main() -> Result<(), std::io::Error> {
                     println!("already installed!");
                 },
                 None => {
-                    println!("{} no mods", "error:".bold().red());
+                    println!("{} no mods found", "error:".bold().red());
                 },
             };
         },

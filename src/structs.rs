@@ -30,9 +30,9 @@ pub struct MinecraftMod {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ModVersion {
-    #[serde(rename = "game_versions")]
-    pub versions: Vec<String>,
-    
+    pub game_versions: Vec<String>,
+    pub version_number: String,
+    pub version_type: String,
     pub loaders: Vec<String>,
     pub files: Vec<ModFile>,
 }
