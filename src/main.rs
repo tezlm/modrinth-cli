@@ -59,13 +59,13 @@ pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, Er
         .send()?
         .json()?;
 
-    for mod_version in mod_versions {
+    for (idx, mod_version) in mod_versions.iter().enumerate() {
         if !mod_version.loaders.contains(&"fabric".into()) { continue; }
 
-        let found_version_index: Option<usize> = mod_version
+        let found_version = mod_version
             .game_versions
             .iter()
-            .position(|ver| {
+            .any(|ver| {
                 let attempt = VersionReq::parse(format!("={}", ver).as_str());
                 match attempt {
                     Ok(parsed_ver) => parsed_ver.matches(&target),
@@ -73,9 +73,8 @@ pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, Er
                 }
             });
 
-        match found_version_index {
-            Some(idx) => { return Ok(mod_version.files[idx].to_owned()); },
-            None => { continue; }
+        if found_version {
+            return Ok(mod_version.files[idx].to_owned());
         }
     }
 
