@@ -27,7 +27,7 @@ fn parse_config() -> Options {
 
 fn get_command() -> (String, String) {
     let args: Vec<String> = env::args().skip(1).collect();
-    if args.len() == 0 { return ("help".into(), "".into()) };
+    if args.is_empty() { return ("help".into(), "".into()) };
     (args[0].to_owned(), args[1..].join(" "))
 }
 
@@ -39,12 +39,12 @@ fn print_mod(mcmod: &MinecraftMod) {
         mcmod.id.bright_black(),
     );
     println!("{}", mcmod.description);
-    println!("");
+    println!();
 }
 
-pub fn search_mods(query: &String) -> Result<MinecraftMods, Error> {
+pub fn search_mods(query: &str) -> Result<MinecraftMods, Error> {
     let mut mods: MinecraftMods = get("https://api.modrinth.com/api/v1/mod")
-        .param("query", &query)
+        .param("query", query)
         .send()?
         .json()?;
     for m in &mut mods.hits {
@@ -53,7 +53,7 @@ pub fn search_mods(query: &String) -> Result<MinecraftMods, Error> {
     Ok(mods)
 }
 
-pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, Error> {
+pub fn find_correct_version(id: &str, target: &Version) -> Result<ModFile, Error> {
     let url: String = format!("https://api.modrinth.com/api/v1/mod/{}/version", id);
     let mod_versions: Vec<ModVersion> = get(url)
         .send()?
@@ -66,11 +66,8 @@ pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, Er
             .game_versions
             .iter()
             .any(|ver| {
-                let attempt = VersionReq::parse(format!("={}", ver).as_str());
-                match attempt {
-                    Ok(parsed_ver) => parsed_ver.matches(&target),
-                    Err(_) => false
-                }
+                VersionReq::parse(&format!("={}", ver))
+                    .is_ok_and(|v| v.matches(target))
             });
 
         if found_version {
@@ -89,8 +86,8 @@ pub fn find_correct_version(id: &String, target: &Version) -> Result<ModFile, Er
     )
 }
 
-fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: ProgressBar<T>) -> Result<(), Error> {
-    let res = get(&url).send()?;
+fn install<T: std::io::Write>(url: &str, filename: &str, mut bar: ProgressBar<T>) -> Result<(), Error> {
+    let res = get(url).send()?;
     let (_, headers, mut body) = res.split();
     let len = headers
         .get("Content-Length")
@@ -106,7 +103,7 @@ fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: Progress
         .write(true)
         .append(false)
         .create(true)
-        .open(&filename)?; 
+        .open(filename)?;
     
     bar.total = len;
     bar.set_units(Units::Bytes);
@@ -128,8 +125,8 @@ fn install<T: std::io::Write>(url: &String, filename: &String, mut bar: Progress
     Ok(())
 }
 
-fn install_single(id: &String, target: &Version) -> Result<OptionMod, Error> {
-    let bullseye = find_correct_version(&id, &target)?;
+fn install_single(id: &str, target: &Version) -> Result<OptionMod, Error> {
+    let bullseye = find_correct_version(id, target)?;
     let ModFile { url, filename } = bullseye;
     let bar = ProgressBar::new(0);
 
@@ -137,8 +134,8 @@ fn install_single(id: &String, target: &Version) -> Result<OptionMod, Error> {
     
     Ok(OptionMod {
         id: id.to_string(),
-        filename: filename.to_owned(),
-        url: url.to_owned(),
+        filename,
+        url,
     })
 }
 
@@ -156,14 +153,10 @@ fn install_pack(mods: &Vec<OptionMod>) -> Result<(), Error> {
     Ok(())
 }
 
-fn already_installed(id: &String, options: &Options) -> bool {
+fn already_installed(id: &str, options: &Options) -> bool {
     match options.mods.iter().find(|h| h.id.eq(id)) { 
         Some(found) => {
-            if std::fs::metadata(&found.filename).is_ok() {
-                true
-            } else {
-                false
-            }
+            std::fs::metadata(&found.filename).is_ok()
         },
         None => false,
     }
@@ -172,7 +165,7 @@ fn already_installed(id: &String, options: &Options) -> bool {
 fn find_mod(query: &str, mods: &MinecraftMods, options: &Options) -> Option<ModState> {
     if mods.hits.len() == 1 {
         let id = mods.hits[0].id.to_owned();
-        if already_installed(&id, &options) {
+        if already_installed(&id, options) {
             return Some(ModState::Installed(id));
         } else {
             return Some(ModState::Uninstalled(id));
@@ -181,7 +174,7 @@ fn find_mod(query: &str, mods: &MinecraftMods, options: &Options) -> Option<ModS
 
     for (i, m) in mods.hits.iter().enumerate() {
         if m.title.to_lowercase() == query {
-            if already_installed(&m.id, &options) {
+            if already_installed(&m.id, options) {
                 return Some(ModState::Installed(m.id.to_owned()));
             } else {
                 return Some(ModState::Uninstalled(m.id.to_owned()));
@@ -203,6 +196,7 @@ fn main() -> Result<(), Error> {
     let (subcommand, query) = get_command();
     let mut options = parse_config();
     match subcommand.as_str() {
+        #[allow(clippy::print_literal)]
         "--help" | "help" => {
             let border = "===".bright_black();
             println!("{} {} {}", border, "modrinth cli".bright_blue(), border);
@@ -245,7 +239,7 @@ fn main() -> Result<(), Error> {
             match options.mods.iter().position(|m| m.filename.to_lowercase().contains(&query)) {
                 Some(i) => {
                     let file = &options.mods.get(i).unwrap().filename;
-                    if std::fs::remove_file(&file).is_ok() {
+                    if std::fs::remove_file(file).is_ok() {
                         println!("adios, {}", &file);
                     } else {
                         println!("{} cant find the file, removed anyway", "error:".bold().red());
@@ -258,7 +252,7 @@ fn main() -> Result<(), Error> {
             };
         },
         "pack" | "p" => {
-            if options.mods.len() == 0 {
+            if options.mods.is_empty() {
                 println!("no mods in pack!");
             } else {
                 install_pack(&options.mods)?;
